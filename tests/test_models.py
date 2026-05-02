@@ -2,6 +2,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from backend.models import Base, Project, Checkpoint
+from backend.workspace_manager import WorkspaceManager
+import backend.workspace_manager as wm_module
 
 @pytest.fixture
 def db():
@@ -24,3 +26,10 @@ def test_checkpoint_links_to_project(db):
     db.add(c)
     db.commit()
     assert db.get(Checkpoint, c.id).project_id == p.id
+
+def test_workspace_write_read_list(tmp_path, monkeypatch):
+    monkeypatch.setattr(wm_module, "WORKSPACE_ROOT", tmp_path)
+    mgr = WorkspaceManager("my-app")
+    mgr.write_file("src/index.ts", "export default {}")
+    assert mgr.read_file("src/index.ts") == "export default {}"
+    assert "src/index.ts" in mgr.list_files()
