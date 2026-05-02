@@ -1,11 +1,16 @@
 from abc import ABC, abstractmethod
 
+from crewai import LLM
+
 
 class LLMProvider(ABC):
-    name: str
     is_local: bool = False
 
+    @property
     @abstractmethod
-    def get_llm(self):
-        """Return a CrewAI-compatible LLM instance."""
+    def name(self) -> str:
+        ...
+
+    @abstractmethod
+    def get_llm(self) -> LLM:
         ...
