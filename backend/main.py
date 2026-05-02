@@ -17,4 +17,8 @@ app.add_middleware(
 )
 
 from backend.api.stream import router as stream_router
+from backend.api.projects import router as projects_router
+from backend.api.settings import router as settings_router
 app.include_router(stream_router)
+app.include_router(projects_router)
+app.include_router(settings_router)
