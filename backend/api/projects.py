@@ -12,24 +12,28 @@ router = APIRouter()
 
 class ProjectCreate(BaseModel):
     spec: str
+    model: str | None = None
 
 def _slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()[:40]).strip("-")
 
-async def _run(project_id: int, slug: str, spec: str, db: Session):
+async def _run(project_id: int, slug: str, spec: str, active_model: str, db: Session):
     r = ProviderRouter.from_config_file()
+    r.active_model = active_model
     ckpt = CheckpointManager(db)
     await Supervisor(project_id, slug, spec, r, ckpt).run()
 
 @router.post("/projects", status_code=201)
 def create_project(body: ProjectCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     r = ProviderRouter.from_config_file()
+    if body.model:
+        r.active_model = body.model
     slug = _slugify(body.spec)
     p = Project(slug=slug, spec_text=body.spec, status="running", active_model=r.active_model)
     db.add(p); db.commit(); db.refresh(p)
     # Pass _run directly — FastAPI BackgroundTasks handles async coroutines natively.
     # Do NOT wrap with asyncio.run(); it cannot nest inside FastAPI's running event loop.
-    background_tasks.add_task(_run, p.id, slug, body.spec, db)
+    background_tasks.add_task(_run, p.id, slug, body.spec, r.active_model, db)
     return {"id": p.id, "slug": p.slug, "status": p.status}
 
 @router.get("/projects")

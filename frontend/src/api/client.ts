@@ -1,10 +1,10 @@
 const BASE = "http://localhost:8000";
 
-export async function createProject(spec: string) {
+export async function createProject(spec: string, model?: string) {
   const res = await fetch(`${BASE}/projects`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ spec }),
+    body: JSON.stringify({ spec, model }),
   });
   return res.json();
 }
