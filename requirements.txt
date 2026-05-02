@@ -1,0 +1,13 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+sqlalchemy==2.0.35
+crewai==0.80.0
+crewai-tools==0.17.0
+openai==1.50.0
+anthropic==0.34.0
+google-generativeai==0.8.0
+pydantic==2.9.0
+pyyaml==6.0.2
+pytest==8.3.0
+pytest-asyncio==0.24.0
+httpx==0.27.0
