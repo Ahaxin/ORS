@@ -15,3 +15,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from backend.api.stream import router as stream_router
+app.include_router(stream_router)
