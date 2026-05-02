@@ -1,6 +1,13 @@
-# backend/database.py — stub, replaced in Task 2
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from backend.models import Base
+
+engine = create_engine("sqlite:///ors.db", connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(bind=engine)
+
 def create_tables():
-    pass
+    Base.metadata.create_all(engine)
 
 def get_db():
-    pass
+    with SessionLocal() as session:
+        yield session
