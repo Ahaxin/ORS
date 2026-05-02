@@ -1,4 +1,4 @@
-import { TaskEvent } from "../hooks/useSSE";
+import type { TaskEvent } from "../hooks/useSSE";
 
 const TASKS = ["clarify", "architect", "generate", "review", "fix"];
 

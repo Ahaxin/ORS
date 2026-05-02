@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { TaskEvent } from "../hooks/useSSE";
+import type { TaskEvent } from "../hooks/useSSE";
 
 type Props = { events: TaskEvent[]; activeTask: string };
 
