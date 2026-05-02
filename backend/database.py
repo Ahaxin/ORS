@@ -9,5 +9,11 @@ def create_tables():
     Base.metadata.create_all(engine)
 
 def get_db():
-    with SessionLocal() as session:
+    session = SessionLocal()
+    try:
         yield session
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

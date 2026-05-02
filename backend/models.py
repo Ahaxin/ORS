@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, Text, DateTime, ForeignKey
+from sqlalchemy import String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
@@ -16,7 +16,9 @@ class Project(Base):
     pending_model: Mapped[str | None] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    checkpoints: Mapped[list["Checkpoint"]] = relationship(back_populates="project")
+    checkpoints: Mapped[list["Checkpoint"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
 
 class Checkpoint(Base):
     __tablename__ = "checkpoints"
