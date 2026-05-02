@@ -1,3 +1,4 @@
+import asyncio
 import re
 from crewai import Crew, Process
 from backend.providers.router import ProviderRouter
@@ -27,17 +28,21 @@ class Supervisor:
         self.ckpt = checkpoint_mgr
         self.ws = WorkspaceManager(slug)
 
-    async def emit(self, task: str, event_type: str, data: dict = {}):
-        await event_bus.publish(self.project_id, {"task": task, "type": event_type, **data})
+    async def emit(self, task: str, event_type: str, data: dict | None = None):
+        await event_bus.publish(self.project_id, {"task": task, "type": event_type, **(data or {})})
 
     def _llm(self):
         return self.router.get_provider().get_llm()
 
-    def _run(self, task, agent):
-        return Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=True).kickoff().raw
+    async def _run(self, task, agent) -> str:
+        loop = asyncio.get_event_loop()
+        crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=True)
+        result = await loop.run_in_executor(None, crew.kickoff)
+        return result.raw
 
     def _write_files(self, raw: str):
-        for m in re.finditer(r"=== FILE: (.+?) ===\n([\s\S]*?)(?==== FILE:|$)", raw):
+        raw = raw.replace("\r\n", "\n")
+        for m in re.finditer(r"=== FILE: (.+?) ===\s*\n([\s\S]*?)(?=\n=== FILE:|\Z)", raw):
             self.ws.write_file(m.group(1).strip(), m.group(2).strip())
 
     async def run(self):
@@ -48,7 +53,7 @@ class Supervisor:
             refined_spec = cached["refined_spec"]
         else:
             agent = make_clarifier(self._llm())
-            refined_spec = self._run(build_clarify_task(agent, self.spec), agent)
+            refined_spec = await self._run(build_clarify_task(agent, self.spec), agent)
             self.ckpt.save(self.project_id, "clarify", self.router.active_model, {"refined_spec": refined_spec})
         self.router.apply_pending()
         await self.emit("clarify", "completed", {"output": refined_spec})
@@ -60,7 +65,7 @@ class Supervisor:
             plan = cached["plan"]
         else:
             agent = make_architect(self._llm())
-            plan = self._run(build_architect_task(agent, refined_spec), agent)
+            plan = await self._run(build_architect_task(agent, refined_spec), agent)
             self.ckpt.save(self.project_id, "architect", self.router.active_model, {"plan": plan})
         self.router.apply_pending()
         await self.emit("architect", "completed", {"output": plan})
@@ -70,9 +75,10 @@ class Supervisor:
         cached = self.ckpt.load(self.project_id, "generate")
         if cached:
             files_content = cached["files_content"]
+            self._write_files(files_content)  # re-populate workspace after restart
         else:
             agent = make_file_writer(self._llm())
-            files_content = self._run(build_generate_task(agent, plan, refined_spec), agent)
+            files_content = await self._run(build_generate_task(agent, plan, refined_spec), agent)
             self._write_files(files_content)
             self.ckpt.save(self.project_id, "generate", self.router.active_model, {"files_content": files_content})
         self.router.apply_pending()
@@ -82,22 +88,27 @@ class Supervisor:
         for i in range(MAX_FIX_ITERATIONS):
             await self.emit("review", "started", {"iteration": i + 1})
             reviewer = make_reviewer(self._llm())
-            review = self._run(build_review_task(reviewer, self.ws.file_tree(), files_content), reviewer)
+            review = await self._run(build_review_task(reviewer, self.ws.file_tree(), files_content), reviewer)
 
             if "PASS" in review:
                 self.ckpt.save(self.project_id, "review", self.router.active_model, {"result": "PASS"})
                 await self.emit("review", "completed", {"result": "PASS"})
+                self.router.apply_pending()
                 break
 
             if not self.router.should_auto_retry():
+                self.router.apply_pending()
                 await self.emit("review", "paused", {"issues": review})
                 return
 
             await self.emit("fix", "started", {"iteration": i + 1})
             fixer = make_fixer(self._llm())
-            files_content = self._run(build_fix_task(fixer, review, files_content), fixer)
+            files_content = await self._run(build_fix_task(fixer, review, files_content), fixer)
             self._write_files(files_content)
             self.router.apply_pending()
             await self.emit("fix", "completed")
+        else:
+            # Loop completed without break = no PASS achieved
+            await self.emit("review", "failed", {"message": f"Max fix iterations ({MAX_FIX_ITERATIONS}) reached without PASS"})
 
         await self.emit("done", "done", {"workspace": f"workspace/{self.slug}"})
