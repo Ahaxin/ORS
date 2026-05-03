@@ -6,9 +6,10 @@ class LMStudioProvider(LLMProvider):
     name = "lmstudio"
     is_local = True
 
-    def __init__(self, base_url: str, model: str):
+    def __init__(self, base_url: str, model: str, concurrency: int = 1):
         self.base_url = base_url
         self.model = model
+        self.concurrency = concurrency
 
     def get_llm(self):
         return LLM(model=f"openai/{self.model}", base_url=self.base_url, api_key="lm-studio")

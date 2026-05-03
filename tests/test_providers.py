@@ -70,3 +70,30 @@ def test_hybrid_retry_cloud_is_pause():
     cfg = {**_cfg, "default_model": "openai", "retry_policy": "hybrid"}
     router = ProviderRouter(cfg)
     assert router.should_auto_retry() is False  # openai is not local
+
+
+def test_provider_default_concurrency():
+    p = LMStudioProvider(base_url="http://localhost:1234/v1", model="qwen")
+    assert p.concurrency == 1
+
+
+def test_provider_custom_concurrency():
+    p = OpenAIProvider(api_key="sk-test", model="gpt-4o-mini", concurrency=4)
+    assert p.concurrency == 4
+
+
+def test_router_passes_concurrency():
+    cfg = {
+        **_cfg,
+        "providers": {
+            **_cfg["providers"],
+            "openai": {"api_key": "sk-test", "default_model": "gpt-4o-mini", "concurrency": 4},
+        }
+    }
+    router = ProviderRouter(cfg)
+    assert router.get_provider("openai").concurrency == 4
+
+
+def test_router_default_concurrency_when_absent():
+    router = ProviderRouter(_cfg)  # _cfg has no concurrency keys
+    assert router.get_provider("lmstudio").concurrency == 1
