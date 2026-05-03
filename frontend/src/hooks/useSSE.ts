@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export type TaskEvent = {
+export type StepEvent = {
   task: string;
   type: "started" | "completed" | "paused" | "failed" | "done";
   output?: string;
@@ -11,6 +11,15 @@ export type TaskEvent = {
   workspace?: string;
   message?: string;
 };
+
+export type WorkerEvent = {
+  task: "generate";
+  type: "worker_started" | "worker_completed";
+  worker_id: number;
+  files: string[];
+};
+
+export type TaskEvent = StepEvent | WorkerEvent;
 
 export function useSSE(projectId: number | null) {
   const [events, setEvents] = useState<TaskEvent[]>([]);
