@@ -20,6 +20,12 @@ class WorkspaceManager:
     def write_text(self, relative_path: str, content: str):
         self.write_file(relative_path, content)
 
+    def append_text(self, relative_path: str, content: str):
+        target = self.root / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "a", encoding="utf-8") as f:
+            f.write(content)
+
     def read_file(self, relative_path: str) -> str:
         return (self.root / relative_path).read_text(encoding="utf-8")
 
