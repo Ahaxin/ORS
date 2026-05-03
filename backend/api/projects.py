@@ -66,3 +66,16 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
         shutil.rmtree(workspace_root)
     db.delete(p)
     db.commit()
+
+
+@router.post("/projects/{project_id}/resume")
+def resume_project(project_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    p = db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if p.status not in ("stalled", "paused"):
+        raise HTTPException(status_code=409, detail=f"Cannot resume a project with status '{p.status}'")
+    p.status = "running"
+    db.commit()
+    background_tasks.add_task(_run, p.id, p.slug, p.spec_text, p.active_model, db)
+    return {"id": p.id, "status": "running"}

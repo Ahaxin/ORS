@@ -1,12 +1,23 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from backend.database import create_tables
+from sqlalchemy.orm import Session
+from backend.database import create_tables, SessionLocal
+from backend.models import Project
+
+
+def reset_orphaned_running_projects(db: Session) -> None:
+    db.query(Project).filter(Project.status == "running").update({"status": "stalled"})
+    db.commit()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_tables()
+    with SessionLocal() as db:
+        reset_orphaned_running_projects(db)
     yield
+
 
 app = FastAPI(title="ORS", lifespan=lifespan)
 app.add_middleware(
