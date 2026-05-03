@@ -40,7 +40,9 @@ def test_chunk_task_description_forbids_placeholders():
 
 def test_chunk_task_expected_output_mentions_headers():
     files = [{"path": "src/app.ts", "description": "entry"}]
+    agent = _fake_agent()
     with mock.patch("backend.orchestrator.crew.Task", _make_task_class()):
         from backend.orchestrator.crew import build_generate_chunk_task
-        task = build_generate_chunk_task(_fake_agent(), files, "spec")
+        task = build_generate_chunk_task(agent, files, "spec")
     assert "===" in task.expected_output
+    assert task.agent is agent

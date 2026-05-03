@@ -37,7 +37,7 @@ def build_generate_task(agent, plan: str, spec: str) -> Task:
 
 
 def build_generate_chunk_task(agent, files: list[dict], spec: str) -> Task:
-    file_list = "\n".join(f"- {f['path']}: {f['description']}" for f in files)
+    file_list = "\n".join(f"- {f.get('path', '<unknown>')}: {f.get('description', '')}" for f in files)
     return Task(
         description=(
             f"Generate ONLY these files:\n{file_list}\n\nSpec: {spec}\n\n"

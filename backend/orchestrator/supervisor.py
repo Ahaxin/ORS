@@ -36,7 +36,7 @@ class Supervisor:
         return self.router.get_provider().get_llm()
 
     async def _run(self, task, agent) -> str:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=True)
         result = await loop.run_in_executor(None, crew.kickoff)
         return result.raw
@@ -54,7 +54,7 @@ class Supervisor:
         agent = make_file_writer(self._llm())
         task = build_generate_chunk_task(agent, files, spec)
         crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=True)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, crew.kickoff)
         await self.emit("generate", "worker_completed", {
             "worker_id": worker_id,
@@ -104,7 +104,7 @@ class Supervisor:
 
             if file_list:
                 concurrency = self.router.get_provider().concurrency
-                n = min(concurrency, len(file_list))
+                n = min(concurrency, len(file_list))  # n <= len ensures no empty chunks
                 chunks = [file_list[i::n] for i in range(n)]
                 results = await asyncio.gather(*[
                     self._run_worker(i, chunk, refined_spec)
