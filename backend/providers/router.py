@@ -17,6 +17,7 @@ class ProviderRouter:
         name = name or self.active_model
         cfg = self.config["providers"][name]
         concurrency = cfg.get("concurrency", 1)
+        provider: LLMProvider
         match name:
             case "openai":    provider = OpenAIProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
             case "anthropic": provider = AnthropicProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
