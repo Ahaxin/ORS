@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 from backend.workspace_manager import WorkspaceManager
 
 
