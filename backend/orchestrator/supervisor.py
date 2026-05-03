@@ -1,7 +1,9 @@
 import asyncio
 import json
 import re
+from datetime import datetime
 from crewai import Crew, Process
+from backend.models import Project
 from backend.providers.router import ProviderRouter
 from backend.orchestrator.checkpoint import CheckpointManager
 from backend.orchestrator.crew import (
@@ -35,32 +37,74 @@ class Supervisor:
     def _llm(self):
         return self.router.get_provider().get_llm()
 
+    def _set_status(self, status: str) -> None:
+        p = self.ckpt.db.get(Project, self.project_id)
+        if p:
+            p.status = status
+            self.ckpt.db.commit()
+
+    def _ts(self) -> str:
+        return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
     async def _run(self, task, agent) -> str:
         loop = asyncio.get_running_loop()
         crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=True)
         result = await loop.run_in_executor(None, crew.kickoff)
         return result.raw
 
-    def _write_files(self, raw: str):
+    def _write_files(self, raw: str) -> None:
         raw = raw.replace("\r\n", "\n")
         for m in re.finditer(r"=== FILE: (.+?) ===\s*\n([\s\S]*?)(?=\n=== FILE:|\Z)", raw):
             self.ws.write_file(m.group(1).strip(), m.group(2).strip())
 
-    async def _run_worker(self, worker_id: int, files: list, spec: str) -> str:
-        await self.emit("generate", "worker_started", {
-            "worker_id": worker_id,
-            "files": [f["path"] for f in files],
-        })
+    async def _run_worker(self, worker_id: int, files: list, spec: str, timeout_seconds: int) -> str:
+        file_paths = [f["path"] for f in files]
+        await self.emit("generate", "worker_started", {"worker_id": worker_id, "files": file_paths})
         agent = make_file_writer(self._llm())
         task = build_generate_chunk_task(agent, files, spec)
         crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=True)
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, crew.kickoff)
-        await self.emit("generate", "worker_completed", {
-            "worker_id": worker_id,
-            "files": [f["path"] for f in files],
-        })
-        return result.raw
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, crew.kickoff),
+            timeout=timeout_seconds,
+        )
+        raw = result.raw
+        self.ckpt.save(self.project_id, f"generate_worker_{worker_id}", self.router.active_model,
+                       {"output": raw, "files": file_paths})
+        entry = f"=== WORKER {worker_id} — {self._ts()} ===\nFiles: {', '.join(file_paths)}\n---\n{raw}\n\n"
+        self.ws.append_text("_ors/generate_log.txt", entry)
+        self.ws.append_text("_ors/run_log.txt", entry)
+        await self.emit("generate", "worker_completed", {"worker_id": worker_id, "files": file_paths})
+        return raw
+
+    async def _run_generate(self, file_list: list, refined_spec: str) -> str:
+        provider = self.router.get_provider()
+        n = min(provider.concurrency, len(file_list))
+        chunks = [file_list[i::n] for i in range(n)]
+
+        results: dict[int, str] = {}
+        pending: list[tuple[int, list]] = []
+
+        for i, chunk in enumerate(chunks):
+            cached = self.ckpt.load(self.project_id, f"generate_worker_{i}")
+            if cached:
+                results[i] = cached["output"]
+                file_names = ", ".join(cached.get("files", []))
+                skipped = f"=== WORKER {i} — skipped (checkpoint) ===\nFiles: {file_names}\n\n"
+                self.ws.append_text("_ors/generate_log.txt", skipped)
+                self.ws.append_text("_ors/run_log.txt", skipped)
+            else:
+                pending.append((i, chunk))
+
+        if pending:
+            new_results = await asyncio.gather(*[
+                self._run_worker(i, chunk, refined_spec, provider.timeout_seconds)
+                for i, chunk in pending
+            ])
+            for (i, _), result in zip(pending, new_results):
+                results[i] = result
+
+        return "\n".join(results[i] for i in sorted(results))
 
     async def run(self):
         # Clarify
@@ -73,6 +117,7 @@ class Supervisor:
             refined_spec = await self._run(build_clarify_task(agent, self.spec), agent)
             self.ckpt.save(self.project_id, "clarify", self.router.active_model, {"refined_spec": refined_spec})
         self.ws.write_json("_ors/clarify.json", {"refined_spec": refined_spec})
+        self.ws.append_text("_ors/run_log.txt", f"=== CLARIFY — {self._ts()} ===\n{refined_spec}\n\n")
         self.router.apply_pending()
         await self.emit("clarify", "completed", {"output": refined_spec})
 
@@ -86,6 +131,7 @@ class Supervisor:
             plan = await self._run(build_architect_task(agent, refined_spec), agent)
             self.ckpt.save(self.project_id, "architect", self.router.active_model, {"plan": plan})
         self.ws.write_json("_ors/architect.json", {"plan": plan})
+        self.ws.append_text("_ors/run_log.txt", f"=== ARCHITECT — {self._ts()} ===\n{plan}\n\n")
         self.router.apply_pending()
         await self.emit("architect", "completed", {"output": plan})
 
@@ -94,7 +140,7 @@ class Supervisor:
         cached = self.ckpt.load(self.project_id, "generate")
         if cached:
             files_content = cached["files_content"]
-            self._write_files(files_content)  # re-populate workspace after restart
+            self._write_files(files_content)
         else:
             try:
                 plan_data = json.loads(plan)
@@ -103,30 +149,32 @@ class Supervisor:
                 file_list = None
 
             if file_list:
-                concurrency = self.router.get_provider().concurrency
-                n = min(concurrency, len(file_list))  # n <= len ensures no empty chunks
-                chunks = [file_list[i::n] for i in range(n)]
-                results = await asyncio.gather(*[
-                    self._run_worker(i, chunk, refined_spec)
-                    for i, chunk in enumerate(chunks)
-                ])
-                files_content = "\n".join(results)
+                files_content = await self._run_generate(file_list, refined_spec)
             else:
                 agent = make_file_writer(self._llm())
                 files_content = await self._run(build_generate_task(agent, plan, refined_spec), agent)
 
             self._write_files(files_content)
             self.ckpt.save(self.project_id, "generate", self.router.active_model, {"files_content": files_content})
+
         self.ws.write_text("_ors/generate.md", files_content)
         self.router.apply_pending()
         await self.emit("generate", "completed", {"file_tree": self.ws.file_tree()})
 
         # Review + Fix loop
+        cached_review = self.ckpt.load(self.project_id, "review")
+        if cached_review and cached_review.get("result") == "PASS":
+            await self.emit("review", "completed", {"result": "PASS"})
+            self._set_status("done")
+            await self.emit("done", "done", {"workspace": f"workspace/{self.slug}"})
+            return
+
         for i in range(MAX_FIX_ITERATIONS):
             await self.emit("review", "started", {"iteration": i + 1})
             reviewer = make_reviewer(self._llm())
             review = await self._run(build_review_task(reviewer, self.ws.file_tree(), files_content), reviewer)
             self.ws.write_json(f"_ors/review_{i + 1}.json", {"result": review})
+            self.ws.append_text("_ors/run_log.txt", f"=== REVIEW {i + 1} — {self._ts()} ===\n{review}\n\n")
 
             if "PASS" in review:
                 self.ckpt.save(self.project_id, "review", self.router.active_model, {"result": "PASS"})
@@ -136,6 +184,7 @@ class Supervisor:
 
             if not self.router.should_auto_retry():
                 self.router.apply_pending()
+                self._set_status("paused")
                 await self.emit("review", "paused", {"issues": review})
                 return
 
@@ -144,10 +193,11 @@ class Supervisor:
             files_content = await self._run(build_fix_task(fixer, review, files_content), fixer)
             self._write_files(files_content)
             self.ws.write_text(f"_ors/fix_{i + 1}.md", files_content)
+            self.ws.append_text("_ors/run_log.txt", f"=== FIX {i + 1} — {self._ts()} ===\n{files_content}\n\n")
             self.router.apply_pending()
             await self.emit("fix", "completed")
         else:
-            # Loop completed without break = no PASS achieved
             await self.emit("review", "failed", {"message": f"Max fix iterations ({MAX_FIX_ITERATIONS}) reached without PASS"})
 
+        self._set_status("done")
         await self.emit("done", "done", {"workspace": f"workspace/{self.slug}"})
