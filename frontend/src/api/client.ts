@@ -20,3 +20,13 @@ export async function switchModel(projectId: number, model: string) {
     body: JSON.stringify({ model }),
   }).then(r => r.json());
 }
+
+export async function deleteProject(id: number): Promise<void> {
+  const res = await fetch(`${BASE}/projects/${id}`, { method: "DELETE" });
+  if (res.status === 409) throw new Error("Cannot delete a running project");
+  if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+}
+
+export async function getLMStudioStatus(): Promise<{ model: string | null; status: string }> {
+  return fetch(`${BASE}/providers/lmstudio/status`).then(r => r.json());
+}
