@@ -13,6 +13,13 @@ class WorkspaceManager:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
 
+    def write_json(self, relative_path: str, data: dict):
+        import json
+        self.write_file(relative_path, json.dumps(data, indent=2))
+
+    def write_text(self, relative_path: str, content: str):
+        self.write_file(relative_path, content)
+
     def read_file(self, relative_path: str) -> str:
         return (self.root / relative_path).read_text(encoding="utf-8")
 

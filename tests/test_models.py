@@ -1,4 +1,5 @@
 import pytest
+import json
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from backend.models import Base, Project, Checkpoint
@@ -33,3 +34,17 @@ def test_workspace_write_read_list(tmp_path, monkeypatch):
     mgr.write_file("src/index.ts", "export default {}")
     assert mgr.read_file("src/index.ts") == "export default {}"
     assert "src/index.ts" in mgr.list_files()
+
+def test_write_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(wm_module, "WORKSPACE_ROOT", tmp_path)
+    mgr = WorkspaceManager("my-app")
+    mgr.write_json("_ors/clarify.json", {"refined_spec": "a todo app"})
+    raw = (tmp_path / "my-app" / "_ors" / "clarify.json").read_text()
+    assert json.loads(raw)["refined_spec"] == "a todo app"
+
+def test_write_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(wm_module, "WORKSPACE_ROOT", tmp_path)
+    mgr = WorkspaceManager("my-app")
+    mgr.write_text("_ors/generate.md", "=== FILE: src/app.ts ===\nconsole.log(1)")
+    content = (tmp_path / "my-app" / "_ors" / "generate.md").read_text()
+    assert "console.log(1)" in content
