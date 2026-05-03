@@ -1,7 +1,7 @@
 import asyncio
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from crewai import Crew, Process
 from backend.models import Project
 from backend.providers.router import ProviderRouter
@@ -38,13 +38,14 @@ class Supervisor:
         return self.router.get_provider().get_llm()
 
     def _set_status(self, status: str) -> None:
+        # Called only from event-loop coroutines (never from executor threads), so session access is safe.
         p = self.ckpt.db.get(Project, self.project_id)
         if p:
             p.status = status
             self.ckpt.db.commit()
 
     def _ts(self) -> str:
-        return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     async def _run(self, task, agent) -> str:
         loop = asyncio.get_running_loop()
@@ -64,6 +65,8 @@ class Supervisor:
         task = build_generate_chunk_task(agent, files, spec)
         crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=True)
         loop = asyncio.get_running_loop()
+        # wait_for cancels the asyncio Future but cannot stop the executor thread; the thread
+        # runs to completion in the background. TimeoutError propagates to the caller normally.
         result = await asyncio.wait_for(
             loop.run_in_executor(None, crew.kickoff),
             timeout=timeout_seconds,
@@ -176,7 +179,7 @@ class Supervisor:
             self.ws.write_json(f"_ors/review_{i + 1}.json", {"result": review})
             self.ws.append_text("_ors/run_log.txt", f"=== REVIEW {i + 1} — {self._ts()} ===\n{review}\n\n")
 
-            if "PASS" in review:
+            if re.search(r'\bPASS\b', review):
                 self.ckpt.save(self.project_id, "review", self.router.active_model, {"result": "PASS"})
                 await self.emit("review", "completed", {"result": "PASS"})
                 self.router.apply_pending()
@@ -197,7 +200,9 @@ class Supervisor:
             self.router.apply_pending()
             await self.emit("fix", "completed")
         else:
+            self._set_status("failed")
             await self.emit("review", "failed", {"message": f"Max fix iterations ({MAX_FIX_ITERATIONS}) reached without PASS"})
+            return
 
         self._set_status("done")
         await self.emit("done", "done", {"workspace": f"workspace/{self.slug}"})

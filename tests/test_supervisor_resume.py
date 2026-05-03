@@ -23,7 +23,7 @@ def project(db):
     return p
 
 
-def make_supervisor(db, project, tmp_path):
+def make_supervisor(db, project, tmp_path, monkeypatch):
     router = MagicMock()
     provider = MagicMock()
     provider.concurrency = 2
@@ -32,16 +32,15 @@ def make_supervisor(db, project, tmp_path):
     router.active_model = "lmstudio"
     router.apply_pending = MagicMock()
     ckpt = CheckpointManager(db)
-    import backend.workspace_manager as wm_module
-    wm_module.WORKSPACE_ROOT = tmp_path
+    monkeypatch.setattr("backend.workspace_manager.WORKSPACE_ROOT", tmp_path)
     sup = Supervisor(project.id, project.slug, project.spec_text, router, ckpt)
     return sup, ckpt
 
 
 @pytest.mark.asyncio
-async def test_run_worker_saves_checkpoint(db, project, tmp_path):
+async def test_run_worker_saves_checkpoint(db, project, tmp_path, monkeypatch):
     """Calls the real _run_worker (not patched) — patches only CrewAI internals."""
-    sup, ckpt = make_supervisor(db, project, tmp_path)
+    sup, ckpt = make_supervisor(db, project, tmp_path, monkeypatch)
 
     mock_result = MagicMock()
     mock_result.raw = "=== FILE: src/a.tsx ===\ncontent"
@@ -61,8 +60,8 @@ async def test_run_worker_saves_checkpoint(db, project, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_resume_skips_completed_worker(db, project, tmp_path):
-    sup, ckpt = make_supervisor(db, project, tmp_path)
+async def test_resume_skips_completed_worker(db, project, tmp_path, monkeypatch):
+    sup, ckpt = make_supervisor(db, project, tmp_path, monkeypatch)
 
     # Pre-seed worker 0 checkpoint
     ckpt.save(project.id, "generate_worker_0", "lmstudio", {
@@ -82,7 +81,6 @@ async def test_resume_skips_completed_worker(db, project, tmp_path):
         return f"=== FILE: {files[0]['path']} ===\nnew"
 
     with patch.object(sup, "_run_worker", side_effect=fake_worker):
-        sup.router.get_provider.return_value.concurrency = 2
         result = await sup._run_generate(file_list, "spec text")
 
     # Worker 0 was cached; only worker 1 should have been called
@@ -92,8 +90,8 @@ async def test_resume_skips_completed_worker(db, project, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_log_written_after_clarify(db, project, tmp_path):
-    sup, ckpt = make_supervisor(db, project, tmp_path)
+async def test_run_log_written_after_clarify(db, project, tmp_path, monkeypatch):
+    sup, ckpt = make_supervisor(db, project, tmp_path, monkeypatch)
 
     # Pre-seed all checkpoints so only log behaviour is tested
     ckpt.save(project.id, "clarify", "lmstudio", {"refined_spec": "todo app spec"})
