@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
-from backend.models import Base, Project
+from backend.models import Base, Project, Checkpoint
 from backend.database import get_db
 from backend.main import app
 
@@ -81,3 +81,29 @@ def test_delete_removes_from_list(client):
     assert client.delete(f"/projects/{pid}").status_code == 204
     projects = client.get("/projects").json()
     assert not any(p["id"] == pid for p in projects)
+
+
+def test_project_events_include_checkpoint_history_and_running_task(client):
+    res = client.post("/projects", json={"spec": "Build a docs site"})
+    pid = res.json()["id"]
+    db = next(client.app.dependency_overrides[get_db]())
+    db.add(Checkpoint(project_id=pid, task_name="clarify", model_used="lmstudio", output_json='{}'))
+    db.commit()
+
+    events = client.get(f"/projects/{pid}/events").json()
+    assert {"task": "clarify", "type": "started"} in events
+    assert {"task": "clarify", "type": "completed"} in events
+    assert {"task": "architect", "type": "started"} in events
+
+
+def test_project_events_done_includes_done_event(client):
+    res = client.post("/projects", json={"spec": "Build a docs site"})
+    pid = res.json()["id"]
+    db = next(client.app.dependency_overrides[get_db]())
+    p = db.get(Project, pid)
+    p.status = "done"
+    db.commit()
+
+    events = client.get(f"/projects/{pid}/events").json()
+    assert events[-1]["task"] == "done"
+    assert events[-1]["type"] == "done"

@@ -4,7 +4,7 @@ import time
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
 from backend.database import get_db
-from backend.models import Project
+from backend.models import Project, Checkpoint
 from backend.providers.router import ProviderRouter
 from backend.orchestrator.checkpoint import CheckpointManager
 from backend.orchestrator.supervisor import Supervisor
@@ -52,6 +52,46 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Project not found")
     return {"id": p.id, "slug": p.slug, "status": p.status,
             "active_model": p.active_model, "pending_model": p.pending_model}
+
+
+@router.get("/projects/{project_id}/events")
+def get_project_events(project_id: int, db: Session = Depends(get_db)):
+    p = db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    checkpoints = (
+        db.query(Checkpoint)
+        .filter_by(project_id=project_id)
+        .order_by(Checkpoint.created_at)
+        .all()
+    )
+
+    events: list[dict] = []
+    seen = {c.task_name for c in checkpoints}
+    for c in checkpoints:
+        # Worker checkpoints are implementation details and not top-level board tasks.
+        if c.task_name.startswith("generate_worker_"):
+            continue
+        events.append({"task": c.task_name, "type": "started"})
+        events.append({"task": c.task_name, "type": "completed"})
+
+    ordered_tasks = ["clarify", "architect", "generate", "review", "fix"]
+    if p.status == "running":
+        for task in ordered_tasks:
+            if task not in seen:
+                events.append({"task": task, "type": "started"})
+                break
+    elif p.status == "done":
+        events.append({"task": "done", "type": "done", "workspace": f"workspace/{p.slug}"})
+    elif p.status == "paused":
+        events.append({"task": "review", "type": "paused", "message": "Run paused for review"})
+    elif p.status == "failed":
+        events.append({"task": "review", "type": "failed", "message": "Run failed"})
+    elif p.status == "stalled":
+        events.append({"task": "generate", "type": "failed", "message": "LM Studio call timed out"})
+
+    return events
 
 @router.delete("/projects/{project_id}", status_code=204)
 def delete_project(project_id: int, db: Session = Depends(get_db)):

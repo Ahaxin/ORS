@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getProjectEvents } from "../api/client";
 
 export type StepEvent = {
   task: "clarify" | "architect" | "generate" | "review" | "fix" | "done";
@@ -32,6 +33,11 @@ export function useSSE(projectId: number | null) {
 
   useEffect(() => {
     if (!projectId) return;
+    setEvents([]);
+    getProjectEvents(projectId)
+      .then((history) => setEvents(Array.isArray(history) ? history as TaskEvent[] : []))
+      .catch(() => setEvents([]));
+
     const es = new EventSource(`http://localhost:8000/projects/${projectId}/stream`);
     es.onmessage = (e) => setEvents(prev => [...prev, JSON.parse(e.data) as TaskEvent]);
     es.onerror = () => es.close();
