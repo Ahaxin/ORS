@@ -12,7 +12,7 @@ def reset_orphaned_running_projects(db: Session) -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     create_tables()
     with SessionLocal() as db:
         reset_orphaned_running_projects(db)

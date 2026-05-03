@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 from backend.models import Base, Project
 from backend.database import get_db
-from backend.main import app
+from backend.main import app, reset_orphaned_running_projects
 
 
 @pytest.fixture
@@ -109,7 +109,6 @@ def test_startup_resets_running_to_stalled(client):
     p.status = "running"
     db.commit()
 
-    from backend.main import reset_orphaned_running_projects
     reset_orphaned_running_projects(db)
     db.refresh(p)
     assert p.status == "stalled"
