@@ -1,6 +1,6 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
-import { getProject, deleteProject, getLMStudioStatus } from "../api/client";
+import { getProject, deleteProject, getLMStudioStatus, resumeProject } from "../api/client";
 import { useSSE, isStepEvent } from "../hooks/useSSE";
 import TaskBoard from "../components/TaskBoard";
 import LogViewer from "../components/LogViewer";
@@ -24,6 +24,7 @@ export default function ProjectPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [lmStatus, setLmStatus] = useState<LMStatus | null>(null);
+  const [resuming, setResuming] = useState(false);
   const lmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const events = useSSE(projectId);
 
@@ -67,6 +68,17 @@ export default function ProjectPage() {
     }
   };
 
+  const handleResume = async () => {
+    if (!project) return;
+    setResuming(true);
+    try {
+      await resumeProject(project.id);
+      setProject(p => p ? { ...p, status: "running" } : p);
+    } finally {
+      setResuming(false);
+    }
+  };
+
   if (!project) {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
@@ -97,16 +109,37 @@ export default function ProjectPage() {
               {lmBadgeLabel}
             </span>
           )}
+          {(project.status === "stalled" || project.status === "paused") && (
+            <button
+              onClick={handleResume}
+              disabled={resuming}
+              className="text-xs bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium px-2 py-1 rounded transition-colors"
+            >
+              {resuming ? "Resuming…" : "Resume"}
+            </button>
+          )}
           <span
             className={`text-sm ${
               isDone
                 ? "text-blue-400"
                 : project.status === "failed"
                 ? "text-red-400"
+                : project.status === "stalled"
+                ? "text-orange-400"
+                : project.status === "paused"
+                ? "text-yellow-400"
                 : "text-green-400"
             }`}
           >
-            {isDone ? "✓ Done" : project.status === "failed" ? "✗ Failed" : "● Running"}
+            {isDone
+              ? "✓ Done"
+              : project.status === "failed"
+              ? "✗ Failed"
+              : project.status === "stalled"
+              ? "⚠ Stalled"
+              : project.status === "paused"
+              ? "⏸ Paused"
+              : "● Running"}
           </span>
 
           {/* Delete */}
@@ -140,12 +173,39 @@ export default function ProjectPage() {
         <LogViewer events={events} activeTask={activeTask} />
       </div>
 
-      {/* Done banner */}
-      {isDone && (
+      {/* Done/stalled/failed banner */}
+      {(isDone || project.status === "stalled" || project.status === "failed") && (
         <div className="px-6 pb-4 shrink-0">
-          <div className="bg-green-950 border border-green-700 rounded-lg px-4 py-3 text-green-300 text-sm">
-            ✓ Build complete — files written to{" "}
-            <code className="text-green-200">workspace/{project.slug}/</code>
+          <div className={`border rounded-lg px-4 py-3 text-sm ${
+            isDone
+              ? "bg-green-950 border-green-700 text-green-300"
+              : project.status === "stalled"
+              ? "bg-orange-950 border-orange-700 text-orange-300"
+              : "bg-red-950 border-red-700 text-red-300"
+          }`}>
+            {isDone
+              ? <>✓ Build complete — files written to <code className="text-green-200">workspace/{project.slug}/</code></>
+              : project.status === "stalled"
+              ? "⚠ Run stalled (LM Studio timed out). Click Resume to continue from last checkpoint."
+              : "✗ Run failed."}
+            <span className="ml-4 space-x-3">
+              <a
+                href={`http://localhost:8000/workspace/${project.slug}/_ors/run_log.txt`}
+                target="_blank"
+                rel="noreferrer"
+                className="underline opacity-70 hover:opacity-100"
+              >
+                View run log
+              </a>
+              <a
+                href={`http://localhost:8000/workspace/${project.slug}/_ors/generate_log.txt`}
+                target="_blank"
+                rel="noreferrer"
+                className="underline opacity-70 hover:opacity-100"
+              >
+                View generate log
+              </a>
+            </span>
           </div>
         </div>
       )}
