@@ -51,10 +51,12 @@ class Supervisor:
         cached = self.ckpt.load(self.project_id, "clarify")
         if cached:
             refined_spec = cached["refined_spec"]
+            self.ws.write_json("_ors/clarify.json", {"refined_spec": refined_spec})
         else:
             agent = make_clarifier(self._llm())
             refined_spec = await self._run(build_clarify_task(agent, self.spec), agent)
             self.ckpt.save(self.project_id, "clarify", self.router.active_model, {"refined_spec": refined_spec})
+            self.ws.write_json("_ors/clarify.json", {"refined_spec": refined_spec})
         self.router.apply_pending()
         await self.emit("clarify", "completed", {"output": refined_spec})
 
@@ -63,10 +65,12 @@ class Supervisor:
         cached = self.ckpt.load(self.project_id, "architect")
         if cached:
             plan = cached["plan"]
+            self.ws.write_json("_ors/architect.json", {"plan": plan})
         else:
             agent = make_architect(self._llm())
             plan = await self._run(build_architect_task(agent, refined_spec), agent)
             self.ckpt.save(self.project_id, "architect", self.router.active_model, {"plan": plan})
+            self.ws.write_json("_ors/architect.json", {"plan": plan})
         self.router.apply_pending()
         await self.emit("architect", "completed", {"output": plan})
 
@@ -76,11 +80,13 @@ class Supervisor:
         if cached:
             files_content = cached["files_content"]
             self._write_files(files_content)  # re-populate workspace after restart
+            self.ws.write_text("_ors/generate.md", files_content)
         else:
             agent = make_file_writer(self._llm())
             files_content = await self._run(build_generate_task(agent, plan, refined_spec), agent)
             self._write_files(files_content)
             self.ckpt.save(self.project_id, "generate", self.router.active_model, {"files_content": files_content})
+            self.ws.write_text("_ors/generate.md", files_content)
         self.router.apply_pending()
         await self.emit("generate", "completed", {"file_tree": self.ws.file_tree()})
 
@@ -89,6 +95,7 @@ class Supervisor:
             await self.emit("review", "started", {"iteration": i + 1})
             reviewer = make_reviewer(self._llm())
             review = await self._run(build_review_task(reviewer, self.ws.file_tree(), files_content), reviewer)
+            self.ws.write_json("_ors/review.json", {"result": review})  # write before branching
 
             if "PASS" in review:
                 self.ckpt.save(self.project_id, "review", self.router.active_model, {"result": "PASS"})
@@ -105,6 +112,7 @@ class Supervisor:
             fixer = make_fixer(self._llm())
             files_content = await self._run(build_fix_task(fixer, review, files_content), fixer)
             self._write_files(files_content)
+            self.ws.write_text(f"_ors/fix_{i + 1}.md", files_content)
             self.router.apply_pending()
             await self.emit("fix", "completed")
         else:
