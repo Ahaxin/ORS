@@ -97,3 +97,32 @@ def test_router_passes_concurrency():
 def test_router_default_concurrency_when_absent():
     router = ProviderRouter(_cfg)  # _cfg has no concurrency keys
     assert router.get_provider("lmstudio").concurrency == 1
+
+
+def test_provider_default_timeout():
+    p = LMStudioProvider(base_url="http://localhost:1234/v1", model="qwen")
+    assert p.timeout_seconds == 600
+
+
+def test_router_reads_timeout_minutes_from_config():
+    cfg = {
+        "default_model": "lmstudio",
+        "retry_policy": "auto",
+        "providers": {
+            "lmstudio": {
+                "base_url": "http://localhost:1234/v1",
+                "default_model": "qwen",
+                "timeout_minutes": 5,
+            }
+        }
+    }
+    router = ProviderRouter(cfg)
+    p = router.get_provider("lmstudio")
+    assert p.timeout_seconds == 300
+
+
+def test_router_default_timeout_when_absent():
+    # _cfg has no timeout_minutes key
+    router = ProviderRouter(_cfg)
+    p = router.get_provider("lmstudio")
+    assert p.timeout_seconds == 600

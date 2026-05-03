@@ -18,11 +18,13 @@ class ProviderRouter:
         cfg = self.config["providers"][name]
         concurrency = cfg.get("concurrency", 1)
         match name:
-            case "openai":    return OpenAIProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
-            case "anthropic": return AnthropicProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
-            case "gemini":    return GeminiProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
-            case "lmstudio":  return LMStudioProvider(base_url=cfg["base_url"], model=cfg["default_model"], concurrency=concurrency)
+            case "openai":    provider = OpenAIProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
+            case "anthropic": provider = AnthropicProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
+            case "gemini":    provider = GeminiProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
+            case "lmstudio":  provider = LMStudioProvider(base_url=cfg["base_url"], model=cfg["default_model"], concurrency=concurrency)
             case _: raise ValueError(f"Unknown provider: {name}")
+        provider.timeout_seconds = cfg.get("timeout_minutes", 10) * 60
+        return provider
 
     def set_pending_model(self, model: str):
         self.pending_model = model
