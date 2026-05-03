@@ -14,7 +14,7 @@ type Project = {
   pending_model?: string;
 };
 
-type LMStatus = { model: string | null; status: string };
+type LMStatus = { model: string | null; status: "ready" | "unavailable" };
 
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
@@ -22,6 +22,7 @@ export default function ProjectPage() {
   const navigate = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [lmStatus, setLmStatus] = useState<LMStatus | null>(null);
   const lmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const events = useSSE(projectId);
@@ -32,10 +33,10 @@ export default function ProjectPage() {
 
   useEffect(() => {
     const last = events.filter(isStepEvent).at(-1);
-    if (last?.type === "completed" || last?.type === "done") {
+    if (last?.type === "done") {
       getProject(projectId).then(setProject);
     }
-  }, [events]);
+  }, [events, projectId]);
 
   const stepEvents = events.filter(isStepEvent);
   const activeTask = [...stepEvents].reverse().find((e) => e.type === "started")?.task ?? "";
@@ -60,7 +61,8 @@ export default function ProjectPage() {
     try {
       await deleteProject(project.id);
       navigate("/");
-    } catch {
+    } catch (e: unknown) {
+      setDeleteError(e instanceof Error ? e.message : "Delete failed");
       setConfirmDelete(false);
     }
   };
@@ -108,18 +110,19 @@ export default function ProjectPage() {
           </span>
 
           {/* Delete */}
+          {deleteError && <span className="text-xs text-red-400">{deleteError}</span>}
           {confirmDelete ? (
             <div className="flex items-center gap-1 text-xs">
               <span className="text-gray-300">Delete?</span>
               <button onClick={handleDelete} className="text-red-400 hover:text-red-300 font-medium">Yes</button>
-              <button onClick={() => setConfirmDelete(false)} className="text-gray-400 hover:text-gray-200">No</button>
+              <button onClick={() => { setConfirmDelete(false); setDeleteError(null); }} className="text-gray-400 hover:text-gray-200">No</button>
             </div>
           ) : (
             <button
               onClick={() => setConfirmDelete(true)}
-              disabled={project.status === "running"}
+              disabled={!isDone && project.status === "running"}
               className="text-gray-500 hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed text-sm font-bold transition-colors"
-              title={project.status === "running" ? "Can't delete a running project" : "Delete project"}
+              title={!isDone && project.status === "running" ? "Can't delete a running project" : "Delete project"}
             >
               ×
             </button>

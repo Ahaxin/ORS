@@ -51,6 +51,7 @@ export default function Gallery() {
     try {
       await deleteProject(id);
       setProjects(prev => prev.filter(p => p.id !== id));
+      setDeleteError(prev => { const next = { ...prev }; delete next[id]; return next; });
       setConfirmId(null);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Delete failed";
@@ -99,10 +100,10 @@ export default function Gallery() {
                     <span className="text-gray-700">·</span>
                     <span className="text-xs text-gray-500">{p.active_model}</span>
                   </div>
-                  {deleteError[p.id] && (
-                    <p className="text-xs text-red-400 mt-1">{deleteError[p.id]}</p>
-                  )}
                 </Link>
+                {deleteError[p.id] && (
+                  <p className="text-xs text-red-400 mt-1 px-4">{deleteError[p.id]}</p>
+                )}
 
                 {/* Delete button — visible on hover, disabled for running projects */}
                 {confirmId === p.id ? (

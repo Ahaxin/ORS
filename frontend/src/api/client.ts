@@ -27,6 +27,6 @@ export async function deleteProject(id: number): Promise<void> {
   if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
 }
 
-export async function getLMStudioStatus(): Promise<{ model: string | null; status: string }> {
+export async function getLMStudioStatus(): Promise<{ model: string | null; status: "ready" | "unavailable" }> {
   return fetch(`${BASE}/providers/lmstudio/status`).then(r => r.json());
 }
