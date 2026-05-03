@@ -1,6 +1,6 @@
-import { useParams, Link } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { getProject } from "../api/client";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { getProject, deleteProject, getLMStudioStatus } from "../api/client";
 import { useSSE, isStepEvent } from "../hooks/useSSE";
 import TaskBoard from "../components/TaskBoard";
 import LogViewer from "../components/LogViewer";
@@ -14,10 +14,16 @@ type Project = {
   pending_model?: string;
 };
 
+type LMStatus = { model: string | null; status: string };
+
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
   const projectId = Number(id);
+  const navigate = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [lmStatus, setLmStatus] = useState<LMStatus | null>(null);
+  const lmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const events = useSSE(projectId);
 
   useEffect(() => {
@@ -31,6 +37,34 @@ export default function ProjectPage() {
     }
   }, [events]);
 
+  const stepEvents = events.filter(isStepEvent);
+  const activeTask = [...stepEvents].reverse().find((e) => e.type === "started")?.task ?? "";
+  const isDone = stepEvents.some((e) => e.type === "done");
+
+  // Poll LM Studio status when active provider is lmstudio and project is not done
+  useEffect(() => {
+    if (!project || project.active_model !== "lmstudio" || isDone) {
+      if (lmIntervalRef.current) clearInterval(lmIntervalRef.current);
+      return;
+    }
+    const poll = () => getLMStudioStatus().then(setLmStatus).catch(() => {});
+    poll();
+    lmIntervalRef.current = setInterval(poll, 5_000);
+    return () => {
+      if (lmIntervalRef.current) clearInterval(lmIntervalRef.current);
+    };
+  }, [project?.active_model, isDone]);
+
+  const handleDelete = async () => {
+    if (!project) return;
+    try {
+      await deleteProject(project.id);
+      navigate("/");
+    } catch {
+      setConfirmDelete(false);
+    }
+  };
+
   if (!project) {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
@@ -39,9 +73,8 @@ export default function ProjectPage() {
     );
   }
 
-  const stepEvents = events.filter(isStepEvent);
-  const activeTask = [...stepEvents].reverse().find((e) => e.type === "started")?.task ?? "";
-  const isDone = stepEvents.some((e) => e.type === "done");
+  const lmBadgeColor = lmStatus?.status === "ready" ? "text-green-400" : "text-red-400";
+  const lmBadgeLabel = lmStatus ? `● ${lmStatus.status}` : null;
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
@@ -57,6 +90,11 @@ export default function ProjectPage() {
             activeModel={project.active_model}
             pendingModel={project.pending_model}
           />
+          {lmBadgeLabel && (
+            <span className={`text-xs ${lmBadgeColor}`} title={lmStatus?.model ?? ""}>
+              {lmBadgeLabel}
+            </span>
+          )}
           <span
             className={`text-sm ${
               isDone
@@ -68,6 +106,24 @@ export default function ProjectPage() {
           >
             {isDone ? "✓ Done" : project.status === "failed" ? "✗ Failed" : "● Running"}
           </span>
+
+          {/* Delete */}
+          {confirmDelete ? (
+            <div className="flex items-center gap-1 text-xs">
+              <span className="text-gray-300">Delete?</span>
+              <button onClick={handleDelete} className="text-red-400 hover:text-red-300 font-medium">Yes</button>
+              <button onClick={() => setConfirmDelete(false)} className="text-gray-400 hover:text-gray-200">No</button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              disabled={project.status === "running"}
+              className="text-gray-500 hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed text-sm font-bold transition-colors"
+              title={project.status === "running" ? "Can't delete a running project" : "Delete project"}
+            >
+              ×
+            </button>
+          )}
         </div>
       </div>
 
