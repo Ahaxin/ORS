@@ -10,7 +10,8 @@
 6. [Checkpoint Resume](#6-checkpoint-resume)
 7. [Retry Policy](#7-retry-policy)
 8. [Finding Generated Files](#8-finding-generated-files)
-9. [Troubleshooting](#9-troubleshooting)
+9. [Deleting Projects](#9-deleting-projects)
+10. [Troubleshooting](#10-troubleshooting)
 
 ---
 
@@ -26,16 +27,26 @@ providers:
   lmstudio:
     base_url: http://localhost:1234/v1
     default_model: qwen2.5-coder
+    concurrency: 4             # max parallel workers in the generate step
   openai:
     api_key: sk-...
     default_model: gpt-4o-mini
+    concurrency: 4
   anthropic:
     api_key: sk-ant-...
     default_model: claude-sonnet-4-6
+    concurrency: 4
   gemini:
     api_key: AIza...
     default_model: gemini-2.0-flash
+    concurrency: 2
 ```
+
+### Concurrency
+
+The `concurrency` value controls how many parallel file-writing workers the Generate step can launch. When the Architect returns a structured file plan (JSON with a `files` array), ORS splits the file list into `min(concurrency, file_count)` chunks and runs one CrewAI crew per chunk simultaneously. If the Architect output is plain text (not parseable as JSON), ORS falls back to a single-worker generate.
+
+Set `concurrency: 1` to disable parallel generation for a provider.
 
 ### Changing the LM Studio model
 
@@ -170,22 +181,51 @@ Shows the five stages of a build:
 Each card shows its current state:
 
 - **Pending** (dim) — not started yet
-- **Running** (yellow, pulsing) — active right now
+- **Running** (yellow) — active right now
 - **Done** (green) — completed successfully
 - **Paused** (orange) — waiting for your approval (cloud model, review found issues)
 - **Failed** (red) — max fix iterations reached without passing review
 
+#### Parallel generate worker sub-rows
+
+When the Generate step runs with multiple workers, the task board shows a sub-row for each worker beneath the Generate card:
+
+```
+┌─────────────────────┐
+│ generate            │
+│ lmstudio · running… │
+└─────────────────────┘
+  ├ Worker 1: src/app.ts, src/index.ts  ● running
+  ├ Worker 2: src/api/route.ts, …       ● done
+  └ Worker 3: prisma/schema.prisma      ● running
+```
+
+Each sub-row shows the files assigned to that worker and whether it is still running or finished. Sub-rows disappear once the Generate step completes.
+
 ### Log viewer (right panel)
 
-Shows all SSE events grouped by task, newest at the top. Click any task header to expand or collapse its log. The currently active task starts expanded.
+Shows all SSE events grouped by task. Click any task header to expand or collapse its log. The currently active task starts expanded.
 
-Each log entry shows the event type (`started`, `completed`, `paused`, etc.) and any output snippet.
+Each log entry shows the event type (`started`, `completed`, `paused`, etc.) and any output snippet. Worker events in the generate group show `[worker N] file1, file2, …`.
 
 ### Status indicator (top right)
 
 - **● Running** (green) — build is in progress
 - **✓ Done** (blue) — build finished; files are in `workspace/<slug>/`
 - **✗ Failed** (red) — build stopped; check the log for details
+
+### LM Studio status badge
+
+When a project uses LM Studio as its active provider, a small badge appears in the top navigation bar:
+
+- **● ready** (green) — LM Studio is running and a model is loaded
+- **● unavailable** (red) — LM Studio is not reachable or no model is loaded
+
+The badge polls every 5 seconds while the build is running and disappears once the build finishes. Use it to confirm LM Studio is healthy before starting a long build.
+
+### Delete button
+
+A **×** button appears in the top navigation bar. It is disabled while the project is running. Click it to open an inline confirm prompt (`Delete? Yes / No`). Confirming deletes the project from the database and removes the entire `workspace/<slug>/` directory, then returns you to the gallery.
 
 ### Done banner
 
@@ -272,37 +312,72 @@ For example, a project with slug `build-a-todo-app` produces:
 
 ```
 workspace/
-└── build-a-todo-app/
+└── build-a-todo-app-1234567890/
+    ├── _ors/                        ← pipeline debug outputs
+    │   ├── clarify.json             ← Clarifier output (refined spec)
+    │   ├── architect.json           ← Architect output (file plan)
+    │   ├── generate.md              ← raw Generate output (all === FILE: === blocks)
+    │   ├── review_1.json            ← first Review verdict
+    │   ├── fix_1.md                 ← first Fix output (if needed)
+    │   └── review_2.json            ← second Review verdict (if loop ran again)
     ├── app/
     │   ├── page.tsx
     │   ├── layout.tsx
-    │   └── api/
-    │       └── tasks/
-    │           └── route.ts
-    ├── components/
-    │   └── TaskList.tsx
-    ├── prisma/
-    │   └── schema.prisma
+    │   └── api/tasks/route.ts
+    ├── components/TaskList.tsx
+    ├── prisma/schema.prisma
     └── package.json
 ```
+
+The `_ors/` directory is created automatically during every build. Use it to understand what the agents decided at each step, or to diagnose why a particular file came out wrong.
 
 The generated code is a standard Next.js 14+ app. To run it:
 
 ```bash
-cd workspace/build-a-todo-app
+cd workspace/build-a-todo-app-1234567890
 npm install
 npm run dev
 ```
 
 ---
 
-## 9. Troubleshooting
+## 9. Deleting Projects
+
+### From the Gallery
+
+Hover over any project card to reveal a **×** button in the top-right corner of the card. The button is disabled for running projects.
+
+Click **×** → an inline `Delete? Yes / No` prompt appears. Click **Yes** to permanently delete the project. The card disappears from the gallery immediately.
+
+If deletion fails (e.g., a 409 because the project just started running), a brief error message appears on the card.
+
+### From the Project View
+
+A **×** button is always visible in the top navigation bar. It is disabled while the build is running. Click it and confirm to delete the project and return to the gallery.
+
+### What gets deleted
+
+- The project row and all its checkpoints from `ors.db`
+- The entire `workspace/<slug>/` directory including all generated files and `_ors/` outputs
+
+Deletion is permanent. There is no undo.
+
+---
+
+## 10. Troubleshooting
 
 ### LM Studio: "Connection refused" or timeout
 
-- Make sure LM Studio is running and the local server is started (green indicator in LM Studio's top bar).
-- Check the port: LM Studio defaults to `1234`. Verify `base_url` in `config.yaml` matches.
+- Make sure LM Studio is running and the **Local Server** is started (use the green play button in LM Studio's "Local Server" tab — not the new REST API).
+- The correct server URL is `http://localhost:1234/v1` (OpenAI-compatible). Verify `base_url` in `config.yaml` matches.
 - Make sure a model is loaded in LM Studio before starting a build.
+- Watch the **● ready / ● unavailable** badge in the project view — it polls LM Studio every 5 seconds and gives immediate feedback on whether the server is reachable.
+
+### LM Studio: Status badge shows ● unavailable
+
+- The badge polls `GET /providers/lmstudio/status` which calls `http://localhost:1234/v1/models`.
+- If it stays red: LM Studio's local server is not running, or no model is loaded.
+- If it shows green but generation fails: the model is loaded but may be too small for the task — try a larger context window or a code-focused model.
 
 ### LM Studio: Wrong model being used
 
