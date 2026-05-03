@@ -1,10 +1,11 @@
 import asyncio
+import json
 import re
 from crewai import Crew, Process
 from backend.providers.router import ProviderRouter
 from backend.orchestrator.checkpoint import CheckpointManager
 from backend.orchestrator.crew import (
-    build_clarify_task, build_architect_task, build_generate_task,
+    build_clarify_task, build_architect_task, build_generate_task, build_generate_chunk_task,
     build_review_task, build_fix_task,
 )
 from backend.orchestrator.agents.clarifier import make_clarifier
@@ -45,6 +46,22 @@ class Supervisor:
         for m in re.finditer(r"=== FILE: (.+?) ===\s*\n([\s\S]*?)(?=\n=== FILE:|\Z)", raw):
             self.ws.write_file(m.group(1).strip(), m.group(2).strip())
 
+    async def _run_worker(self, worker_id: int, files: list, spec: str) -> str:
+        await self.emit("generate", "worker_started", {
+            "worker_id": worker_id,
+            "files": [f["path"] for f in files],
+        })
+        agent = make_file_writer(self._llm())
+        task = build_generate_chunk_task(agent, files, spec)
+        crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=True)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, crew.kickoff)
+        await self.emit("generate", "worker_completed", {
+            "worker_id": worker_id,
+            "files": [f["path"] for f in files],
+        })
+        return result.raw
+
     async def run(self):
         # Clarify
         await self.emit("clarify", "started")
@@ -79,8 +96,25 @@ class Supervisor:
             files_content = cached["files_content"]
             self._write_files(files_content)  # re-populate workspace after restart
         else:
-            agent = make_file_writer(self._llm())
-            files_content = await self._run(build_generate_task(agent, plan, refined_spec), agent)
+            try:
+                plan_data = json.loads(plan)
+                file_list = plan_data["files"]
+            except (json.JSONDecodeError, KeyError, TypeError):
+                file_list = None
+
+            if file_list:
+                concurrency = self.router.get_provider().concurrency
+                n = min(concurrency, len(file_list))
+                chunks = [file_list[i::n] for i in range(n)]
+                results = await asyncio.gather(*[
+                    self._run_worker(i, chunk, refined_spec)
+                    for i, chunk in enumerate(chunks)
+                ])
+                files_content = "\n".join(results)
+            else:
+                agent = make_file_writer(self._llm())
+                files_content = await self._run(build_generate_task(agent, plan, refined_spec), agent)
+
             self._write_files(files_content)
             self.ckpt.save(self.project_id, "generate", self.router.active_model, {"files_content": files_content})
         self.ws.write_text("_ors/generate.md", files_content)
