@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
-from backend.models import Base
+from backend.models import Base, Project
 from backend.database import get_db
 from backend.main import app
 
@@ -50,8 +50,6 @@ def test_switch_model(client):
 def test_delete_project(client):
     res = client.post("/projects", json={"spec": "Build a blog"})
     pid = res.json()["id"]
-    from backend.database import get_db
-    from backend.models import Project
     db = next(client.app.dependency_overrides[get_db]())
     p = db.get(Project, pid)
     p.status = "done"
@@ -66,8 +64,6 @@ def test_delete_project_not_found(client):
 def test_delete_running_project_returns_409(client):
     res = client.post("/projects", json={"spec": "Build a blog"})
     pid = res.json()["id"]
-    from backend.database import get_db
-    from backend.models import Project
     db = next(client.app.dependency_overrides[get_db]())
     p = db.get(Project, pid)
     p.status = "running"
@@ -78,12 +74,10 @@ def test_delete_running_project_returns_409(client):
 def test_delete_removes_from_list(client):
     res = client.post("/projects", json={"spec": "Build a shop"})
     pid = res.json()["id"]
-    from backend.database import get_db
-    from backend.models import Project
     db = next(client.app.dependency_overrides[get_db]())
     p = db.get(Project, pid)
     p.status = "done"
     db.commit()
-    client.delete(f"/projects/{pid}")
+    assert client.delete(f"/projects/{pid}").status_code == 204
     projects = client.get("/projects").json()
     assert not any(p["id"] == pid for p in projects)

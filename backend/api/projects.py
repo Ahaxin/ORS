@@ -61,8 +61,8 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
     if p.status == "running":
         raise HTTPException(status_code=409, detail="Cannot delete a running project")
     slug = p.slug
-    db.delete(p)
-    db.commit()
     workspace_root = WorkspaceManager(slug).root
     if workspace_root.exists():
         shutil.rmtree(workspace_root)
+    db.delete(p)
+    db.commit()
