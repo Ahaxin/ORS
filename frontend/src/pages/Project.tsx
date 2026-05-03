@@ -1,7 +1,7 @@
 import { useParams, Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { getProject } from "../api/client";
-import { useSSE } from "../hooks/useSSE";
+import { useSSE, isStepEvent } from "../hooks/useSSE";
 import TaskBoard from "../components/TaskBoard";
 import LogViewer from "../components/LogViewer";
 import ModelPicker from "../components/ModelPicker";
@@ -25,7 +25,7 @@ export default function ProjectPage() {
   }, [projectId]);
 
   useEffect(() => {
-    const last = events.at(-1);
+    const last = events.filter(isStepEvent).at(-1);
     if (last?.type === "completed" || last?.type === "done") {
       getProject(projectId).then(setProject);
     }
@@ -39,9 +39,9 @@ export default function ProjectPage() {
     );
   }
 
-  const activeTask =
-    [...events].reverse().find((e) => e.type === "started")?.task ?? "";
-  const isDone = events.some((e) => e.type === "done");
+  const stepEvents = events.filter(isStepEvent);
+  const activeTask = [...stepEvents].reverse().find((e) => e.type === "started")?.task ?? "";
+  const isDone = stepEvents.some((e) => e.type === "done");
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">

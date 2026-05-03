@@ -1,8 +1,6 @@
 import { useState } from "react";
-import type { TaskEvent, StepEvent } from "../hooks/useSSE";
-
-const isStepEvent = (e: TaskEvent): e is StepEvent =>
-  e.type !== "worker_started" && e.type !== "worker_completed";
+import { isStepEvent } from "../hooks/useSSE";
+import type { TaskEvent } from "../hooks/useSSE";
 
 type Props = { events: TaskEvent[]; activeTask: string };
 
@@ -30,7 +28,9 @@ export default function LogViewer({ events, activeTask }: Props) {
               {evts.map((e, i) => (
                 <div key={i}>
                   <span className="text-gray-500">[{e.type}]</span>{" "}
-                  {isStepEvent(e) ? (e.output ? e.output.slice(0, 300) : e.issues ?? e.message ?? "") : e.files.join(", ")}
+                  {isStepEvent(e)
+                    ? (e.output ? e.output.slice(0, 300) : e.issues ?? e.message ?? "")
+                    : `[worker ${e.worker_id}] ${e.files.join(", ")}`}
                 </div>
               ))}
             </div>

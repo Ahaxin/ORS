@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 export type StepEvent = {
-  task: string;
+  task: "clarify" | "architect" | "generate" | "review" | "fix" | "done";
   type: "started" | "completed" | "paused" | "failed" | "done";
   output?: string;
   issues?: string;
@@ -20,6 +20,12 @@ export type WorkerEvent = {
 };
 
 export type TaskEvent = StepEvent | WorkerEvent;
+
+export const isStepEvent = (e: TaskEvent): e is StepEvent =>
+  e.type !== "worker_started" && e.type !== "worker_completed";
+
+export const isWorkerEvent = (e: TaskEvent): e is WorkerEvent =>
+  e.type === "worker_started" || e.type === "worker_completed";
 
 export function useSSE(projectId: number | null) {
   const [events, setEvents] = useState<TaskEvent[]>([]);

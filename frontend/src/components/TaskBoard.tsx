@@ -1,14 +1,9 @@
-import type { TaskEvent, StepEvent, WorkerEvent } from "../hooks/useSSE";
+import { isStepEvent, isWorkerEvent } from "../hooks/useSSE";
+import type { TaskEvent } from "../hooks/useSSE";
 
 const TASKS = ["clarify", "architect", "generate", "review", "fix"];
 
 type Props = { events: TaskEvent[]; activeModel: string; pendingModel?: string };
-
-const isStepEvent = (e: TaskEvent): e is StepEvent =>
-  e.type !== "worker_started" && e.type !== "worker_completed";
-
-const isWorkerEvent = (e: TaskEvent): e is WorkerEvent =>
-  e.type === "worker_started" || e.type === "worker_completed";
 
 export default function TaskBoard({ events, activeModel, pendingModel }: Props) {
   const stepEvents = events.filter(isStepEvent);
@@ -42,8 +37,7 @@ export default function TaskBoard({ events, activeModel, pendingModel }: Props) 
   }
 
   const generateStatus = statusOf("generate");
-  const allWorkersDone = workerStatus.size > 0 && [...workerStatus.values()].every(s => s === "done");
-  const showWorkers = generateStatus === "running" || (workerStatus.size > 0 && !allWorkersDone);
+  const showWorkers = generateStatus === "running" && workerStatus.size > 0;
 
   return (
     <div className="flex flex-col gap-2 w-64 shrink-0">
