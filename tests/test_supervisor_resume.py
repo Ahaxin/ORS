@@ -107,3 +107,42 @@ async def test_run_log_written_after_clarify(db, project, tmp_path, monkeypatch)
     content = log_path.read_text(encoding="utf-8")
     assert "CLARIFY" in content
     assert "ARCHITECT" in content
+
+
+@pytest.mark.asyncio
+async def test_run_worker_raises_timeout(db, project, tmp_path, monkeypatch):
+    """Calls real _run_worker with a near-zero timeout — verifies asyncio.wait_for fires."""
+    sup, ckpt = make_supervisor(db, project, tmp_path, monkeypatch)
+
+    import time
+
+    def slow_kickoff():
+        time.sleep(5)  # far longer than the 0.01s timeout
+
+    with patch("backend.orchestrator.supervisor.Crew") as MockCrew, \
+         patch("backend.orchestrator.supervisor.make_file_writer"), \
+         patch("backend.orchestrator.supervisor.build_generate_chunk_task"):
+        MockCrew.return_value.kickoff.side_effect = slow_kickoff
+        with pytest.raises(asyncio.TimeoutError):
+            await sup._run_worker(
+                0, [{"path": "src/a.tsx", "description": "A"}], "spec", timeout_seconds=0.01
+            )
+
+
+@pytest.mark.asyncio
+async def test_stalled_status_written_on_timeout(db, project, tmp_path, monkeypatch):
+    sup, ckpt = make_supervisor(db, project, tmp_path, monkeypatch)
+
+    # Pre-seed clarify and architect checkpoints so run() proceeds to generate
+    ckpt.save(project.id, "clarify", "lmstudio", {"refined_spec": "spec"})
+    ckpt.save(project.id, "architect", "lmstudio", {"plan": '{"files": [{"path": "src/a.tsx", "description": "A"}]}'})
+
+    async def timeout_worker(worker_id, files, spec, timeout_seconds):
+        raise asyncio.TimeoutError()
+
+    with patch.object(sup, "_run_worker", side_effect=timeout_worker), \
+         patch.object(sup, "emit", new=AsyncMock()):
+        await sup.run()
+
+    db.refresh(project)
+    assert project.status == "stalled"

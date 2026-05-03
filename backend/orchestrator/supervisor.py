@@ -58,7 +58,7 @@ class Supervisor:
         for m in re.finditer(r"=== FILE: (.+?) ===\s*\n([\s\S]*?)(?=\n=== FILE:|\Z)", raw):
             self.ws.write_file(m.group(1).strip(), m.group(2).strip())
 
-    async def _run_worker(self, worker_id: int, files: list, spec: str, timeout_seconds: int) -> str:
+    async def _run_worker(self, worker_id: int, files: list, spec: str, timeout_seconds: float) -> str:
         file_paths = [f["path"] for f in files]
         await self.emit("generate", "worker_started", {"worker_id": worker_id, "files": file_paths})
         agent = make_file_writer(self._llm())
@@ -151,11 +151,16 @@ class Supervisor:
             except (json.JSONDecodeError, KeyError, TypeError):
                 file_list = None
 
-            if file_list:
-                files_content = await self._run_generate(file_list, refined_spec)
-            else:
-                agent = make_file_writer(self._llm())
-                files_content = await self._run(build_generate_task(agent, plan, refined_spec), agent)
+            try:
+                if file_list:
+                    files_content = await self._run_generate(file_list, refined_spec)
+                else:
+                    agent = make_file_writer(self._llm())
+                    files_content = await self._run(build_generate_task(agent, plan, refined_spec), agent)
+            except asyncio.TimeoutError:
+                self._set_status("stalled")
+                await self.emit("generate", "stalled", {"message": "LM Studio call timed out — resume when ready"})
+                return
 
             self._write_files(files_content)
             self.ckpt.save(self.project_id, "generate", self.router.active_model, {"files_content": files_content})
