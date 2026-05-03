@@ -32,5 +32,5 @@ def lmstudio_status():
         if data:
             return {"model": data[0]["id"], "status": "ready"}
         return {"model": None, "status": "unavailable"}
-    except Exception:
+    except httpx.HTTPError:
         return {"model": None, "status": "unavailable"}

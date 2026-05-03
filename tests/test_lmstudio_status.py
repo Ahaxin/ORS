@@ -1,3 +1,4 @@
+import httpx
 from unittest import mock
 from fastapi.testclient import TestClient
 from backend.main import app
@@ -57,7 +58,7 @@ def test_lmstudio_status_unavailable_empty_list():
 
 def test_lmstudio_status_unavailable_on_connection_error():
     with mock.patch("backend.api.settings.ProviderRouter.from_config_file", return_value=_mock_router()), \
-         mock.patch("httpx.get", side_effect=Exception("connection refused")):
+         mock.patch("httpx.get", side_effect=httpx.ConnectError("connection refused")):
         res = client.get("/providers/lmstudio/status")
 
     assert res.status_code == 200
