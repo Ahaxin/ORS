@@ -151,13 +151,14 @@ class Supervisor:
             except (json.JSONDecodeError, KeyError, TypeError):
                 file_list = None
 
+            files_content = ""
             try:
                 if file_list:
                     files_content = await self._run_generate(file_list, refined_spec)
                 else:
                     agent = make_file_writer(self._llm())
                     files_content = await self._run(build_generate_task(agent, plan, refined_spec), agent)
-            except asyncio.TimeoutError:
+            except asyncio.TimeoutError:  # concurrent.futures.TimeoutError is a distinct class not raised by asyncio.wait_for
                 self._set_status("stalled")
                 await self.emit("generate", "stalled", {"message": "LM Studio call timed out — resume when ready"})
                 return

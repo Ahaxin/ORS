@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 from sqlalchemy import create_engine
@@ -112,12 +113,12 @@ async def test_run_log_written_after_clarify(db, project, tmp_path, monkeypatch)
 @pytest.mark.asyncio
 async def test_run_worker_raises_timeout(db, project, tmp_path, monkeypatch):
     """Calls real _run_worker with a near-zero timeout — verifies asyncio.wait_for fires."""
-    sup, ckpt = make_supervisor(db, project, tmp_path, monkeypatch)
+    sup, _ = make_supervisor(db, project, tmp_path, monkeypatch)
 
-    import time
+    stop = threading.Event()
 
     def slow_kickoff():
-        time.sleep(5)  # far longer than the 0.01s timeout
+        stop.wait(timeout=10)  # waits up to 10 s; signalled after the timeout fires
 
     with patch("backend.orchestrator.supervisor.Crew") as MockCrew, \
          patch("backend.orchestrator.supervisor.make_file_writer"), \
@@ -127,6 +128,7 @@ async def test_run_worker_raises_timeout(db, project, tmp_path, monkeypatch):
             await sup._run_worker(
                 0, [{"path": "src/a.tsx", "description": "A"}], "spec", timeout_seconds=0.01
             )
+    stop.set()  # unblock the executor thread so the event loop can shut down cleanly
 
 
 @pytest.mark.asyncio
@@ -137,7 +139,7 @@ async def test_stalled_status_written_on_timeout(db, project, tmp_path, monkeypa
     ckpt.save(project.id, "clarify", "lmstudio", {"refined_spec": "spec"})
     ckpt.save(project.id, "architect", "lmstudio", {"plan": '{"files": [{"path": "src/a.tsx", "description": "A"}]}'})
 
-    async def timeout_worker(worker_id, files, spec, timeout_seconds):
+    async def timeout_worker(_worker_id, _files, _spec, _timeout_seconds):
         raise asyncio.TimeoutError()
 
     with patch.object(sup, "_run_worker", side_effect=timeout_worker), \
