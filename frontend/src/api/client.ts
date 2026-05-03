@@ -30,3 +30,13 @@ export async function deleteProject(id: number): Promise<void> {
 export async function getLMStudioStatus(): Promise<{ model: string | null; status: "ready" | "unavailable" }> {
   return fetch(`${BASE}/providers/lmstudio/status`).then(r => r.json());
 }
+
+export async function resumeProject(id: number): Promise<{ id: number; status: string }> {
+  const res = await fetch(`${BASE}/projects/${id}/resume`, { method: "POST" });
+  if (res.status === 409) {
+    const data = await res.json();
+    throw new Error(data.detail ?? "Cannot resume project");
+  }
+  if (!res.ok) throw new Error(`Resume failed: ${res.status}`);
+  return res.json();
+}

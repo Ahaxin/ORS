@@ -5,6 +5,7 @@ class OpenAIProvider(LLMProvider):
     name = "openai"
 
     def __init__(self, api_key: str, model: str = "gpt-4o-mini", concurrency: int = 1):
+        super().__init__()
         self.api_key = api_key
         self.model = model
         self.concurrency = concurrency

@@ -1,5 +1,5 @@
 import yaml
-from backend.providers.base import LLMProvider
+from backend.providers.base import LLMProvider, DEFAULT_TIMEOUT_MINUTES
 from backend.providers.openai_provider import OpenAIProvider
 from backend.providers.anthropic_provider import AnthropicProvider
 from backend.providers.gemini_provider import GeminiProvider
@@ -17,12 +17,15 @@ class ProviderRouter:
         name = name or self.active_model
         cfg = self.config["providers"][name]
         concurrency = cfg.get("concurrency", 1)
+        provider: LLMProvider
         match name:
-            case "openai":    return OpenAIProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
-            case "anthropic": return AnthropicProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
-            case "gemini":    return GeminiProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
-            case "lmstudio":  return LMStudioProvider(base_url=cfg["base_url"], model=cfg["default_model"], concurrency=concurrency)
+            case "openai":    provider = OpenAIProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
+            case "anthropic": provider = AnthropicProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
+            case "gemini":    provider = GeminiProvider(api_key=cfg["api_key"], model=cfg["default_model"], concurrency=concurrency)
+            case "lmstudio":  provider = LMStudioProvider(base_url=cfg["base_url"], model=cfg["default_model"], concurrency=concurrency)
             case _: raise ValueError(f"Unknown provider: {name}")
+        provider.timeout_seconds = cfg.get("timeout_minutes", DEFAULT_TIMEOUT_MINUTES) * 60
+        return provider
 
     def set_pending_model(self, model: str):
         self.pending_model = model

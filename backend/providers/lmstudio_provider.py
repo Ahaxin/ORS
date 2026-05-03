@@ -7,6 +7,7 @@ class LMStudioProvider(LLMProvider):
     is_local = True
 
     def __init__(self, base_url: str, model: str, concurrency: int = 1):
+        super().__init__()
         self.base_url = base_url
         self.model = model
         self.concurrency = concurrency

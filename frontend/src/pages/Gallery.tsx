@@ -13,6 +13,8 @@ const STATUS_COLOR: Record<string, string> = {
   running: "text-green-400",
   done: "text-blue-400",
   failed: "text-red-400",
+  stalled: "text-orange-400",
+  paused: "text-yellow-400",
   pending: "text-gray-400",
 };
 
@@ -41,8 +43,8 @@ export default function Gallery() {
   }, []);
 
   useEffect(() => {
-    const hasRunning = projects.some(p => p.status === "running");
-    if (!hasRunning) return;
+    const hasActive = projects.some(p => p.status === "running" || p.status === "stalled" || p.status === "paused");
+    if (!hasActive) return;
     const id = setInterval(fetchProjects, 10_000);
     return () => clearInterval(id);
   }, [projects]);
