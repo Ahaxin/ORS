@@ -25,6 +25,7 @@ export default function ProjectPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [lmStatus, setLmStatus] = useState<LMStatus | null>(null);
   const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const lmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const events = useSSE(projectId);
 
@@ -71,9 +72,12 @@ export default function ProjectPage() {
   const handleResume = async () => {
     if (!project) return;
     setResuming(true);
+    setResumeError(null);
     try {
-      await resumeProject(project.id);
-      setProject(p => p ? { ...p, status: "running" } : p);
+      const data = await resumeProject(project.id);
+      setProject(p => p ? { ...p, status: data.status } : p);
+    } catch (e: unknown) {
+      setResumeError(e instanceof Error ? e.message : "Resume failed");
     } finally {
       setResuming(false);
     }
@@ -110,13 +114,16 @@ export default function ProjectPage() {
             </span>
           )}
           {(project.status === "stalled" || project.status === "paused") && (
-            <button
-              onClick={handleResume}
-              disabled={resuming}
-              className="text-xs bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium px-2 py-1 rounded transition-colors"
-            >
-              {resuming ? "Resuming…" : "Resume"}
-            </button>
+            <>
+              {resumeError && <span className="text-xs text-red-400">{resumeError}</span>}
+              <button
+                onClick={handleResume}
+                disabled={resuming}
+                className="text-xs bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium px-2 py-1 rounded transition-colors"
+              >
+                {resuming ? "Resuming…" : "Resume"}
+              </button>
+            </>
           )}
           <span
             className={`text-sm ${
@@ -173,20 +180,24 @@ export default function ProjectPage() {
         <LogViewer events={events} activeTask={activeTask} />
       </div>
 
-      {/* Done/stalled/failed banner */}
-      {(isDone || project.status === "stalled" || project.status === "failed") && (
+      {/* Done/stalled/paused/failed banner */}
+      {(isDone || project.status === "stalled" || project.status === "paused" || project.status === "failed") && (
         <div className="px-6 pb-4 shrink-0">
           <div className={`border rounded-lg px-4 py-3 text-sm ${
             isDone
               ? "bg-green-950 border-green-700 text-green-300"
               : project.status === "stalled"
               ? "bg-orange-950 border-orange-700 text-orange-300"
+              : project.status === "paused"
+              ? "bg-yellow-950 border-yellow-700 text-yellow-300"
               : "bg-red-950 border-red-700 text-red-300"
           }`}>
             {isDone
               ? <>✓ Build complete — files written to <code className="text-green-200">workspace/{project.slug}/</code></>
               : project.status === "stalled"
               ? "⚠ Run stalled (LM Studio timed out). Click Resume to continue from last checkpoint."
+              : project.status === "paused"
+              ? "⏸ Run paused for review. Click Resume to continue."
               : "✗ Run failed."}
             <span className="ml-4 space-x-3">
               <a
