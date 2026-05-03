@@ -46,3 +46,44 @@ def test_switch_model(client):
     res = client.put(f"/projects/{pid}/model", json={"model": "openai"})
     assert res.status_code == 200
     assert res.json()["pending_model"] == "openai"
+
+def test_delete_project(client):
+    res = client.post("/projects", json={"spec": "Build a blog"})
+    pid = res.json()["id"]
+    from backend.database import get_db
+    from backend.models import Project
+    db = next(client.app.dependency_overrides[get_db]())
+    p = db.get(Project, pid)
+    p.status = "done"
+    db.commit()
+    res = client.delete(f"/projects/{pid}")
+    assert res.status_code == 204
+
+def test_delete_project_not_found(client):
+    res = client.delete("/projects/9999")
+    assert res.status_code == 404
+
+def test_delete_running_project_returns_409(client):
+    res = client.post("/projects", json={"spec": "Build a blog"})
+    pid = res.json()["id"]
+    from backend.database import get_db
+    from backend.models import Project
+    db = next(client.app.dependency_overrides[get_db]())
+    p = db.get(Project, pid)
+    p.status = "running"
+    db.commit()
+    res = client.delete(f"/projects/{pid}")
+    assert res.status_code == 409
+
+def test_delete_removes_from_list(client):
+    res = client.post("/projects", json={"spec": "Build a shop"})
+    pid = res.json()["id"]
+    from backend.database import get_db
+    from backend.models import Project
+    db = next(client.app.dependency_overrides[get_db]())
+    p = db.get(Project, pid)
+    p.status = "done"
+    db.commit()
+    client.delete(f"/projects/{pid}")
+    projects = client.get("/projects").json()
+    assert not any(p["id"] == pid for p in projects)

@@ -1,4 +1,6 @@
 import re
+import shutil
+import time
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
 from backend.database import get_db
@@ -6,6 +8,7 @@ from backend.models import Project
 from backend.providers.router import ProviderRouter
 from backend.orchestrator.checkpoint import CheckpointManager
 from backend.orchestrator.supervisor import Supervisor
+from backend.workspace_manager import WorkspaceManager
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -15,7 +18,8 @@ class ProjectCreate(BaseModel):
     model: str | None = None
 
 def _slugify(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()[:40]).strip("-")
+    base = re.sub(r"[^a-z0-9]+", "-", text.lower()[:40]).strip("-")
+    return f"{base}-{int(time.time())}"
 
 async def _run(project_id: int, slug: str, spec: str, active_model: str, db: Session):
     r = ProviderRouter.from_config_file()
@@ -48,3 +52,17 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Project not found")
     return {"id": p.id, "slug": p.slug, "status": p.status,
             "active_model": p.active_model, "pending_model": p.pending_model}
+
+@router.delete("/projects/{project_id}", status_code=204)
+def delete_project(project_id: int, db: Session = Depends(get_db)):
+    p = db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if p.status == "running":
+        raise HTTPException(status_code=409, detail="Cannot delete a running project")
+    slug = p.slug
+    db.delete(p)
+    db.commit()
+    workspace_root = WorkspaceManager(slug).root
+    if workspace_root.exists():
+        shutil.rmtree(workspace_root)
