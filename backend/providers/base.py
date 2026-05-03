@@ -5,11 +5,7 @@ from crewai import LLM
 class LLMProvider(ABC):
     is_local: bool = False
     concurrency: int = 1
-
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        ...
+    name: str
 
     @abstractmethod
     def get_llm(self) -> LLM:
